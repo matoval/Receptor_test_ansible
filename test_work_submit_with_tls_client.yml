@@ -33,12 +33,88 @@
                       export GOPATH=$HOME/go
                 - name: Source bashrc
                   ansible.builtin.shell: source /home/{{ ansible_user }}/.bashrc
+        - name: Install Receptor
+          block:
+            - name: Clone Receptor repo
+              ansible.builtin.git:
+                repo: https://github.com/ansible/receptor.git
+                dest: /home/{{ ansible_user }}/receptor
+                version: devel
+            - name: Create Receptor bin
+              become: true
+              community.general.make:
+                chdir: /home/{{ ansible_user }}/receptor
+                target: build-all
+            - name: Symlink Receptor bin
+              become: true
+              ansible.builtin.file:
+                src: /home/{{ ansible_user }}/receptor/receptor
+                dest: /usr/local/bin/receptor
+                state: link
         - name: Install Kind
           become: true
           ansible.builtin.get_url:
-            url: https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+            url: https://kind.sigs.k8s.io/dl/v0.11.1/kind-linux-amd64
             dest: /usr/local/bin/kind
             mode: "0755"
+        - name: Create user@.service.d dir
+          become: true
+          ansible.builtin.file:
+            path: /etc/systemd/system/user@.service.d
+            state: directory
+        - name: Add delegate.conf
+          become: true
+          ansible.builtin.copy:
+            dest: /etc/systemd/system/user@.service.d/delegate.conf
+            content: |
+              [Service]
+              Delegate=yes
+        - name: Install and enable Docker
+          become: true
+          block:
+            - name: Make sure dnf-plugins.core installed
+              ansible.builtin.yum:
+                name: dnf-plugins-core
+                state: present
+            - name: Install docker repository
+              ansible.builtin.command: dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+            - name: Make sure docker from distro is not installed
+              ansible.builtin.yum:
+                name: "{{ item }}"
+                state: absent
+              with_items:
+                - docker
+                - docker-common
+                - container-selinux
+                - docker-selinux
+                - docker-engine
+            - name: Install docker
+              ansible.builtin.yum:
+                name: "{{ item }}"
+                state: present
+              with_items:
+                - docker-ce
+                - docker-ce-cli
+                - containerd.io
+                - docker-buildx-plugin
+                - docker-compose-plugin
+            - name: Ensure docker deamon is running
+              ansible.builtin.service:
+                name: docker
+                state: started
+            - name: Add user to Docker group
+              ansible.builtin.user:
+                name: "{{ ansible_user }}"
+                group: docker
+        - name: Create iptables.conf
+          become: true
+          ansible.builtin.copy:
+            dest: /etc/modules-load.d/iptables.conf
+            content: |
+              ip6_tables
+              ip6table_nat
+              ip_tables
+              iptable_nat
         - name: Install kubectl
           block:
             - name: Overwrite kubernetes.repo
@@ -58,39 +134,42 @@
               ansible.builtin.yum:
                 name: kubectl
                 state: present
+        - name: Create DOCKER_HOST var
+          ansible.builtin.shell: export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock
+        - name: Create k8s cluster
+          ansible.builtin.command:
+            cmd: kind create cluster
         - name: Install make
           become: true
           ansible.builtin.yum:
             name: make
             state: present
-        - name: Install Receptor
-          block:
-            - name: Clone Receptor repo
-              ansible.builtin.git:
-                repo: https://github.com/ansible/receptor.git
-                dest: /home/{{ ansible_user }}/receptor
-                version: devel
-            - name: Create Receptor bin
-              become: true
-              community.general.make:
-                chdir: /home/{{ ansible_user }}/receptor
-                target: receptor
-            - name: Symlink Receptor bin
-              become: true
-              ansible.builtin.file:
-                src: /home/{{ ansible_user }}/receptor/receptor
-                dest: /usr/bin/receptor
-                state: link
-            - name: Run TestWorkSubmitWithTLSClient test
-              ansible.builtin.command:
-                cmd: go test -run TestWorkSubmitWithTLSClient /home/msandova/receptor/tests/functional/mesh -v -count 1
-                chdir: /home/{{ ansible_user }}/receptor
-              register: test_work_submit_with_tls_client_output
+        - name: Run TestWorkSubmitWithTLSClient test
+          ansible.builtin.command:
+            cmd: go test -run TestWorkSubmitWithTLSClient /home/msandova/receptor/tests/functional/mesh -v -count 1
+            chdir: /home/{{ ansible_user }}/receptor
+          register: test_work_submit_with_tls_client_output
         - name: Assert test passed
           ansible.builtin.assert:
             that:
               - "'FAIL' not in test_work_submit_with_tls_client_output.stdout"
       always:
+        - block:
+          - name: Create log file
+            ansible.builtin.file:
+              path: /tmp/test_work_submit_with_tls_client_output-stdout
+              state: touch
+            delegate_to: localhost
+          - name: Log test output to file
+            ansible.builtin.copy:
+              dest: /tmp/test_work_submit_with_tls_client_output-stdout
+              content: "{{ test_work_submit_with_tls_client_output.stdout }}"
+              mode: "0755"
+            delegate_to: localhost
+          when: test_work_submit_with_tls_client_output is defined
+        - name: Delete k8s cluster
+          ansible.builtin.command:
+            cmd: kind delete cluster
         - name: Uninstall Kind
           become: true
           ansible.builtin.file:
