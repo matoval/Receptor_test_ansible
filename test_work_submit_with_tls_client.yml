@@ -8,6 +8,11 @@
         manager: auto
     - name: Run TestWorkSubmitWithTLSClient block
       block:
+        - name: Yum install git
+          become: true
+          ansible.builtin.yum:
+            name: git
+            state: present
         - name: Install Go
           become: true
           when: "'go' not in ansible_facts.packages"
@@ -144,6 +149,15 @@
           ansible.builtin.yum:
             name: make
             state: present
+        - name: Get namespaces
+          ansible.builtin.shell: kubectl get namespaces
+          register: namespaces_list
+        - name: Get services
+          ansible.builtin.shell: kubectl get services
+          register: services_list
+        - name: Get serviceaccounts
+          ansible.builtin.shell: kubectl get serviceAccounts
+          register: serviceaccounts_list
         - name: Run TestWorkSubmitWithTLSClient test
           ansible.builtin.command:
             cmd: go test -run TestWorkSubmitWithTLSClient /home/msandova/receptor/tests/functional/mesh -v -count 1
@@ -163,7 +177,7 @@
           - name: Log test output to file
             ansible.builtin.copy:
               dest: /tmp/test_work_submit_with_tls_client_output-stdout
-              content: "{{ test_work_submit_with_tls_client_output.stdout }}"
+              content: "{{ services_list.stdout }}\n\n{{ serviceaccounts_list.stdout }}\n\n{{ namespaces_list.stdout }}\n\n{{ test_work_submit_with_tls_client_output.stdout }}"
               mode: "0755"
             delegate_to: localhost
           when: test_work_submit_with_tls_client_output is defined
