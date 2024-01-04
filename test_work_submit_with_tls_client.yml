@@ -1,7 +1,6 @@
 ---
 - name: Run TestWorkSubmitWithTLSClient
   hosts: all
-  gather_facts: false
   tasks:
     - name: Check packages
       package_facts:
@@ -74,8 +73,9 @@
             content: |
               [Service]
               Delegate=yes
-        - name: Install and enable Docker
+        - name: Install and enable Docker non-RHel
           become: true
+          when: ansible_distribution != "RedHat"
           block:
             - name: Make sure dnf-plugins.core installed
               ansible.builtin.yum:
@@ -93,6 +93,38 @@
                 - container-selinux
                 - docker-selinux
                 - docker-engine
+            - name: Install docker
+              ansible.builtin.yum:
+                name: "{{ item }}"
+                state: present
+              with_items:
+                - docker-ce
+                - docker-ce-cli
+                - containerd.io
+                - docker-buildx-plugin
+                - docker-compose-plugin
+            - name: Ensure docker deamon is running
+              ansible.builtin.service:
+                name: docker
+                state: started
+            - name: Add user to Docker group
+              ansible.builtin.user:
+                name: "{{ ansible_user }}"
+                group: docker
+        - name: Install and enable Docker on RHEL
+          when: ansible_distribution == "RedHat"
+          become: true
+          block:
+            - name: Install dependencies
+              ansible.builtin.yum:
+                name: "{{ item }}"
+                state: present
+              with_items:
+                - yum-utils
+                - device-mapper-persistent-data
+                - lvm2
+            - name: Install docker repository
+              ansible.builtin.command: yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
             - name: Install docker
               ansible.builtin.yum:
                 name: "{{ item }}"
@@ -160,7 +192,8 @@
           register: serviceaccounts_list
         - name: Run TestWorkSubmitWithTLSClient test
           ansible.builtin.command:
-            cmd: go test -run TestWorkSubmitWithTLSClient /home/msandova/receptor/tests/functional/mesh -v -count 1
+            # cmd: go test -run TestWorkSubmitWithTLSClient /home/msandova/receptor/tests/functional/mesh -v -count 1
+            cmd: make test
             chdir: /home/{{ ansible_user }}/receptor
           register: test_work_submit_with_tls_client_output
         - name: Assert test passed
