@@ -9,7 +9,14 @@
       block:
         - name: Yum install git
           become: true
+          when: ansible_distribution != "Ubuntu"
           ansible.builtin.yum:
+            name: git
+            state: present
+        - name: Apt install git
+          become: true
+          when: ansible_distribution == "Ubuntu"
+          ansible.builtin.apt:
             name: git
             state: present
         - name: Install Go
@@ -17,10 +24,30 @@
           when: "'go' not in ansible_facts.packages"
           block:
             - name: Yum install golang
+              when: ansible_distribution != "Ubuntu"
               ansible.builtin.yum:
                 name: golang
                 state: present
+            - name: Add golang repository into sources list on Ubuntu
+              when: ansible_distribution == "Ubuntu"
+              ansible.builtin.apt_repository:
+                repo: ppa:longsleep/golang-backports
+                state: present
+            - name: Apt install golang
+              when: ansible_distribution == "Ubuntu"
+              ansible.builtin.apt:
+                name: golang
+                state: present
+            - name: Ansible plugin fails if dash is the default shell
+              become: false
+              when: ansible_distribution == "Ubuntu"
+              ansible.builtin.debconf:
+                name: dash/sh
+                question: dash/sh
+                value: false
+                vtype: boolean
             - name: Set GOPATH
+              when: ansible_distribution != "Ubuntu"
               block:
                 - name: Add Go dir
                   ansible.builtin.file:
@@ -35,8 +62,33 @@
                     insertafter: true
                     block: |
                       export GOPATH=$HOME/go
+                      export PATH=$PATH:/usr/local/go/bin
                 - name: Source bashrc
+                  become: false
                   ansible.builtin.shell: source /home/{{ ansible_user }}/.bashrc
+            - name: Set GOPATH
+              when: ansible_distribution == "Ubuntu"
+              block:
+                - name: Add Go dir
+                  ansible.builtin.file:
+                    path: /home/{{ ansible_user }}/go
+                    state: directory
+                    mode: "0755"
+                    owner: "{{ ansible_user }}"
+                    group: "{{ ansible_user }}"
+                - name: Add path to profile
+                  ansible.builtin.blockinfile:
+                    path: /home/{{ ansible_user }}/.profile
+                    insertafter: true
+                    block: |
+                      export GOPATH=$HOME/go
+                      export PATH=$PATH:/usr/local/go/bin
+                # - name: Source profile
+                #   become: false
+                #   ansible.builtin.shell: source /home/{{ ansible_user }}/.profile
+                - name: Path
+                  become: false
+                  ansible.builtin.shell: '/bin/bash -i -c ". /home/{{ ansible_user }}/.profile"'
         - name: Install Receptor
           block:
             - name: Clone Receptor repo
@@ -44,11 +96,28 @@
                 repo: https://github.com/ansible/receptor.git
                 dest: /home/{{ ansible_user }}/receptor
                 version: devel
-            - name: Create Receptor bin
+            - name: Install make
               become: true
-              community.general.make:
+              when: ansible_distribution != "Ubuntu"
+              ansible.builtin.yum:
+                name: make
+                state: present
+            - name: Install make
+              become: true
+              when: ansible_distribution == "Ubuntu"
+              ansible.builtin.apt:
+                name: make
+                state: present
+            - name: Test
+              ansible.builtin.shell: which go
+              register: echo_make
+            - name: Debug
+              ansible.builtin.debug:
+                msg: "{{ echo_make.stdout }}"
+            - name: Create Receptor bin
+              ansible.builtin.shell: make build-all
+              args:              
                 chdir: /home/{{ ansible_user }}/receptor
-                target: build-all
             - name: Symlink Receptor bin
               become: true
               ansible.builtin.file:
@@ -78,12 +147,43 @@
           when: ansible_distribution != "RedHat"
           block:
             - name: Make sure dnf-plugins.core installed
+              when: ansible_distribution != "Ubuntu"
               ansible.builtin.yum:
                 name: dnf-plugins-core
                 state: present
             - name: Install docker repository
+              when: ansible_distribution != "Ubuntu"
               ansible.builtin.command: dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+            - name: Install docker repository on Ubuntu
+              when: ansible_distribution == "Ubuntu"
+              block:
+                - name: Install deps
+                  ansible.builtin.apt:
+                    name: "{{ item }}"
+                    state: present
+                  with_items:
+                    - ca-certificates
+                    - curl
+                    - gnupg
+                - name: Install keyrings
+                  ansible.builtin.command: install -m 0755 -d /etc/apt/keyrings
+                - name: Remove existing gpg
+                  ansible.builtin.file:
+                    path: /etc/apt/keyrings/docker.gpg
+                    state: absent
+                - name: Download gpg
+                  ansible.builtin.shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                - name: Chmod
+                  ansible.builtin.command: chmod a+r /etc/apt/keyrings/docker.gpg
+                - name: Add repo
+                  ansible.builtin.command: echo \
+                    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+                    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+                    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+                - name: Update apt
+                  ansible.builtin.command: sudo apt-get update
             - name: Make sure docker from distro is not installed
+              when: ansible_distribution != "Ubuntu"
               ansible.builtin.yum:
                 name: "{{ item }}"
                 state: absent
@@ -93,8 +193,31 @@
                 - container-selinux
                 - docker-selinux
                 - docker-engine
+            - name: Make sure docker from distro is not installed
+              when: ansible_distribution == "Ubuntu"
+              ansible.builtin.apt:
+                name: "{{ item }}"
+                state: absent
+              with_items:
+                - docker
+                - docker-common
+                - container-selinux
+                - docker-selinux
+                - docker-engine
             - name: Install docker
+              when: ansible_distribution != "Ubuntu"
               ansible.builtin.yum:
+                name: "{{ item }}"
+                state: present
+              with_items:
+                - docker-ce
+                - docker-ce-cli
+                - containerd.io
+                - docker-buildx-plugin
+                - docker-compose-plugin
+            - name: Install docker on Ubuntu
+              when: ansible_distribution == "Ubuntu"
+              ansible.builtin.apt:
                 name: "{{ item }}"
                 state: present
               with_items:
@@ -155,6 +278,7 @@
         - name: Install kubectl
           block:
             - name: Overwrite kubernetes.repo
+              when: ansible_distribution != "Ubuntu"
               become: true
               ansible.builtin.copy:
                 content: |
@@ -168,19 +292,23 @@
                 mode: "0755"
             - name: Install kubectl
               become: true
+              when: ansible_distribution != "Ubuntu"
               ansible.builtin.yum:
                 name: kubectl
                 state: present
+        - name: Download kubectl on Ubuntu
+          become: true
+          when: ansible_distribution == "Ubuntu"
+          ansible.builtin.shell: curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        - name: Install kubectl on Ubuntu
+          become: true
+          when: ansible_distribution == "Ubuntu"
+          ansible.builtin.shell: install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
         - name: Create DOCKER_HOST var
           ansible.builtin.shell: export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock
         - name: Create k8s cluster
           ansible.builtin.command:
             cmd: kind create cluster
-        - name: Install make
-          become: true
-          ansible.builtin.yum:
-            name: make
-            state: present
         - name: Get namespaces
           ansible.builtin.shell: kubectl get namespaces
           register: namespaces_list
@@ -224,6 +352,7 @@
             path: /usr/local/bin/kind
         - name: Uninstall kubectl
           become: true
+          when: ansible_distribution != "Ubuntu"
           ansible.builtin.yum:
             name: kubectl
             state: absent
