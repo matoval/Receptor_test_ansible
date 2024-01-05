@@ -300,7 +300,11 @@
           ansible.builtin.shell: install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
         - name: Create DOCKER_HOST var
           ansible.builtin.shell: export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock
+        - name: Check if cluster exist
+          ansible.builtin.shell: kind get clusters || true
+          register: get_clusters
         - name: Create k8s cluster
+          when: '"kind" not in get_clusters.stdout'
           ansible.builtin.command:
             cmd: kind create cluster
         - name: Get namespaces
