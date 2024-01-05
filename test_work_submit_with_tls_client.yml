@@ -108,12 +108,6 @@
               ansible.builtin.apt:
                 name: make
                 state: present
-            - name: Test
-              ansible.builtin.shell: which go
-              register: echo_make
-            - name: Debug
-              ansible.builtin.debug:
-                msg: "{{ echo_make.stdout }}"
             - name: Create Receptor bin
               ansible.builtin.shell: make build-all
               args:              
