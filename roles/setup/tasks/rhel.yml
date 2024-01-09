@@ -1,0 +1,151 @@
+---
+- name: Yum install git
+  become: true
+  ansible.builtin.yum:
+    name: git
+    state: present
+- name: Install Go
+  become: true
+  when: "'go' not in ansible_facts.packages"
+  block:
+    - name: Yum install golang
+      ansible.builtin.yum:
+        name: golang
+        state: present
+    - name: Set GOPATH
+      block:
+        - name: Add Go dir
+          ansible.builtin.file:
+            path: /home/{{ ansible_user }}/go
+            state: directory
+            mode: "0755"
+            owner: "{{ ansible_user }}"
+            group: "{{ ansible_user }}"
+        - name: Add path to bashrc
+          ansible.builtin.blockinfile:
+            path: /home/{{ ansible_user }}/.bashrc
+            insertafter: true
+            block: |
+              export GOPATH=$HOME/go
+              export PATH=$PATH:/usr/local/go/bin
+        - name: Source bashrc
+          become: false
+          ansible.builtin.shell: source /home/{{ ansible_user }}/.bashrc
+- name: Install Receptor
+  block:
+    - name: Clone Receptor repo
+      ansible.builtin.git:
+        repo: https://github.com/ansible/receptor.git
+        dest: /home/{{ ansible_user }}/receptor
+        version: devel
+    - name: Install make
+      become: true
+      when: ansible_distribution != "Ubuntu"
+      ansible.builtin.yum:
+        name: make
+        state: present
+    - name: Create Receptor bin
+      ansible.builtin.shell: make build-all
+      args:              
+        chdir: /home/{{ ansible_user }}/receptor
+    - name: Symlink Receptor bin
+      become: true
+      ansible.builtin.file:
+        src: /home/{{ ansible_user }}/receptor/receptor
+        dest: /usr/local/bin/receptor
+        state: link
+- name: Install Kind
+  become: true
+  ansible.builtin.get_url:
+    url: https://kind.sigs.k8s.io/dl/v0.11.1/kind-linux-amd64
+    dest: /usr/local/bin/kind
+    mode: "0755"
+- name: Create user@.service.d dir
+  become: true
+  ansible.builtin.file:
+    path: /etc/systemd/system/user@.service.d
+    state: directory
+- name: Add delegate.conf
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/user@.service.d/delegate.conf
+    content: |
+      [Service]
+      Delegate=yes
+- name: Install and enable Docker on RHEL
+  become: true
+  block:
+    - name: Install dependencies
+      ansible.builtin.yum:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - yum-utils
+        - device-mapper-persistent-data
+        - lvm2
+    - name: Install docker repository
+      ansible.builtin.command: yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+    - name: Install docker
+      ansible.builtin.yum:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin
+        - docker-compose-plugin
+    - name: Ensure docker deamon is running
+      ansible.builtin.service:
+        name: docker
+        state: started
+    - name: Add user to Docker group
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        group: docker
+- name: Create iptables.conf
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/iptables.conf
+    content: |
+      ip6_tables
+      ip6table_nat
+      ip_tables
+      iptable_nat
+- name: Install kubectl
+  block:
+    - name: Overwrite kubernetes.repo
+      become: true
+      ansible.builtin.copy:
+        content: |
+          [kubernetes]
+          name=Kubernetes
+          baseurl=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/
+          enabled=1
+          gpgcheck=1
+          gpgkey=https://pkgs.k8s.io/core:/stable:/v1.28/rpm/repodata/repomd.xml.key
+        dest: /etc/yum.repos.d/kubernetes.repo
+        mode: "0755"
+    - name: Install kubectl
+      become: true
+      ansible.builtin.yum:
+        name: kubectl
+        state: present
+- name: Create DOCKER_HOST var
+  ansible.builtin.shell: export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock
+- name: Check if cluster exist
+  ansible.builtin.shell: kind get clusters || true
+  register: get_clusters
+- name: Create k8s cluster
+  when: '"kind" not in get_clusters.stdout'
+  ansible.builtin.command:
+    cmd: kind create cluster
+- name: Get namespaces
+  ansible.builtin.shell: kubectl get namespaces
+  register: namespaces_list
+- name: Get services
+  ansible.builtin.shell: kubectl get services
+  register: services_list
+- name: Get serviceaccounts
+  ansible.builtin.shell: kubectl get serviceAccounts
+  register: serviceaccounts_list

@@ -1,1 +1,3 @@
-# Receptor_test_ansible
+# Ansible Collection - setup_receptor.setup_receptor
+
+Documentation for the collection.

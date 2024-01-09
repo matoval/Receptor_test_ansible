@@ -1,0 +1,19 @@
+---
+- name: Setup and test Receptor
+  hosts: all
+  vars:
+    - cleanup: true #  If true all actions will be cleaned up
+  tasks:
+    - name: Run setup and test roles
+      block:
+        - name: Setup
+          ansible.builtin.include_role:
+            name: ../roles/setup
+        - name: Run make test
+          ansible.builtin.include_role:
+            name: ../roles/run_tests
+      always:
+        - name: Cleanup system
+          when: cleanup
+          ansible.builtin.include_role:
+            name: ../roles/cleanup

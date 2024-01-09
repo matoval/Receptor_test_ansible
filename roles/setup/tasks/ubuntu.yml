@@ -1,0 +1,175 @@
+---
+- name: Apt install git
+  become: true
+  ansible.builtin.apt:
+    name: git
+    state: present
+- name: Install Go
+  become: true
+  when: "'go' not in ansible_facts.packages"
+  block:
+    - name: Add golang repository into sources list on Ubuntu
+      ansible.builtin.apt_repository:
+        repo: ppa:longsleep/golang-backports
+        state: present
+    - name: Apt install golang
+      ansible.builtin.apt:
+        name: golang
+        state: present
+    - name: Ansible plugin fails if dash is the default shell
+      become: false
+      ansible.builtin.debconf:
+        name: dash/sh
+        question: dash/sh
+        value: false
+        vtype: boolean
+    - name: Set GOPATH
+      block:
+        - name: Add Go dir
+          ansible.builtin.file:
+            path: /home/{{ ansible_user }}/go
+            state: directory
+            mode: "0755"
+            owner: "{{ ansible_user }}"
+            group: "{{ ansible_user }}"
+        - name: Add path to profile
+          ansible.builtin.blockinfile:
+            path: /home/{{ ansible_user }}/.profile
+            insertafter: true
+            block: |
+              export GOPATH=$HOME/go
+              export PATH=$PATH:/usr/local/go/bin
+        - name: Path
+          become: false
+          ansible.builtin.shell: '/bin/bash -i -c ". /home/{{ ansible_user }}/.profile"'
+- name: Install Receptor
+  block:
+    - name: Clone Receptor repo
+      ansible.builtin.git:
+        repo: https://github.com/ansible/receptor.git
+        dest: /home/{{ ansible_user }}/receptor
+        version: devel
+    - name: Install make
+      become: true
+      ansible.builtin.apt:
+        name: make
+        state: present
+    - name: Create Receptor bin
+      ansible.builtin.shell: make build-all
+      args:              
+        chdir: /home/{{ ansible_user }}/receptor
+    - name: Symlink Receptor bin
+      become: true
+      ansible.builtin.file:
+        src: /home/{{ ansible_user }}/receptor/receptor
+        dest: /usr/local/bin/receptor
+        state: link
+- name: Install Kind
+  become: true
+  ansible.builtin.get_url:
+    url: https://kind.sigs.k8s.io/dl/v0.11.1/kind-linux-amd64
+    dest: /usr/local/bin/kind
+    mode: "0755"
+- name: Create user@.service.d dir
+  become: true
+  ansible.builtin.file:
+    path: /etc/systemd/system/user@.service.d
+    state: directory
+- name: Add delegate.conf
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/user@.service.d/delegate.conf
+    content: |
+      [Service]
+      Delegate=yes
+- name: Install and enable Docker non-RHel
+  become: true
+  block:
+    - name: Install docker repository on Ubuntu
+      block:
+        - name: Install deps
+          ansible.builtin.apt:
+            name: "{{ item }}"
+            state: present
+          with_items:
+            - ca-certificates
+            - curl
+            - gnupg
+        - name: Install keyrings
+          ansible.builtin.command: install -m 0755 -d /etc/apt/keyrings
+        - name: Remove existing gpg
+          ansible.builtin.file:
+            path: /etc/apt/keyrings/docker.gpg
+            state: absent
+        - name: Download gpg
+          ansible.builtin.shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        - name: Chmod
+          ansible.builtin.command: chmod a+r /etc/apt/keyrings/docker.gpg
+        - name: Add repo
+          ansible.builtin.command: echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+        - name: Update apt
+          ansible.builtin.command: sudo apt-get update
+    - name: Make sure docker from distro is not installed
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: absent
+      with_items:
+        - docker
+        - docker-common
+        - container-selinux
+        - docker-selinux
+        - docker-engine
+    - name: Install docker on Ubuntu
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin
+        - docker-compose-plugin
+    - name: Ensure docker deamon is running
+      ansible.builtin.service:
+        name: docker
+        state: started
+    - name: Add user to Docker group
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        group: docker
+- name: Create iptables.conf
+  become: true
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/iptables.conf
+    content: |
+      ip6_tables
+      ip6table_nat
+      ip_tables
+      iptable_nat
+- name: Download kubectl on Ubuntu
+  become: true
+  ansible.builtin.shell: curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+- name: Install kubectl on Ubuntu
+  become: true
+  ansible.builtin.shell: install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+- name: Create DOCKER_HOST var
+  ansible.builtin.shell: export DOCKER_HOST=unix://${XDG_RUNTIME_DIR}/docker.sock
+- name: Check if cluster exist
+  ansible.builtin.shell: kind get clusters || true
+  register: get_clusters
+- name: Create k8s cluster
+  when: '"kind" not in get_clusters.stdout'
+  ansible.builtin.command:
+    cmd: kind create cluster
+- name: Get namespaces
+  ansible.builtin.shell: kubectl get namespaces
+  register: namespaces_list
+- name: Get services
+  ansible.builtin.shell: kubectl get services
+  register: services_list
+- name: Get serviceaccounts
+  ansible.builtin.shell: kubectl get serviceAccounts
+  register: serviceaccounts_list

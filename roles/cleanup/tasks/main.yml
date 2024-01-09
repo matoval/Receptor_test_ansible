@@ -1,0 +1,18 @@
+---
+- name: Check packages
+  package_facts:
+    manager: auto
+- name: Cleanup specific system
+  block:
+    - name: Cleanup RHEL
+      when: ansible_distribution == "RedHat"
+      ansible.builtin.import_tasks:
+        file: rhel.yml
+    - name: Cleanup Fedora
+      when: ansible_distribution == "Fedora"
+      ansible.builtin.import_tasks:
+        file: fedora.yml
+    - name: Cleanup Ubuntu
+      when: ansible_distribution == "Ubuntu"
+      ansible.builtin.import_tasks:
+        file: ubuntu.yml
