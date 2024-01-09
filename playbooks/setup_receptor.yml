@@ -2,7 +2,7 @@
 - name: Setup and test Receptor
   hosts: all
   vars:
-    - cleanup: true #  If true all actions will be cleaned up
+    - cleanup: false #  If true all actions will be cleaned up
   tasks:
     - name: Run setup and test roles
       block:

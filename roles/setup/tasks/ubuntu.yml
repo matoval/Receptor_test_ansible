@@ -17,7 +17,7 @@
         name: golang
         state: present
     - name: Ansible plugin fails if dash is the default shell
-      become: false
+      become: true
       ansible.builtin.debconf:
         name: dash/sh
         question: dash/sh
@@ -105,13 +105,17 @@
           ansible.builtin.shell: curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
         - name: Chmod
           ansible.builtin.command: chmod a+r /etc/apt/keyrings/docker.gpg
+        - name: Create docker repo file
+          become: true
+          ansible.builtin.file:
+            path: /etc/apt/sources.list.d/docker.list
+            state: touch
+            mode: "0755"
         - name: Add repo
-          ansible.builtin.command: echo \
-            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          become: true
+          ansible.builtin.shell: echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
         - name: Update apt
-          ansible.builtin.command: sudo apt-get update
+          ansible.builtin.command: sudo apt update
     - name: Make sure docker from distro is not installed
       ansible.builtin.apt:
         name: "{{ item }}"

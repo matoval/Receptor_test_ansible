@@ -1,0 +1,80 @@
+---
+- name: Uninstall Go
+  block:
+    - name: Yum uninstall golang
+      ansible.builtin.yum:
+        name: golang
+        state: absent
+    - name: Unset GOPATH
+      block:
+        - name: Remove Go dir
+          ansible.builtin.file:
+            path: /home/{{ ansible_user }}/go
+            state: absent
+        - name: Remove path from bashrc
+          ansible.builtin.lineinfile:
+            dest: /home/{{ ansible_user }}/.bashrc
+            state: absent
+            regexp: "^{{ item }}"
+          with_items:
+            - export GOPATH=$HOME/go
+            - export PATH=$PATH:/usr/local/go/bin
+        - name: Source bashrc
+          become: false
+          ansible.builtin.shell: source /home/{{ ansible_user }}/.bashrc
+- name: Uninstall Receptor
+  block:
+    - name: Unlink Receptor bin
+      ansible.builtin.file:
+        dest: /usr/local/bin/receptor
+        state: absent
+    - name: Uninstall make
+      ansible.builtin.yum:
+        name: make
+        state: absent
+    - name: Delete Receptor repo
+      ansible.builtin.file:
+        state: absent
+        path: /home/{{ ansible_user }}/receptor
+- name: Uninstall Kind
+  ansible.builtin.file:
+    state: absent
+    path: /usr/local/bin/kind
+- name: Delete user@.service.d dir
+  ansible.builtin.file:
+    state: absent
+    path: /etc/systemd/system/user@.service.d
+- name: Uninstall docker
+  ansible.builtin.yum:
+    name: "{{ item }}"
+    state: absent
+  with_items:
+    - docker-ce
+    - docker-ce-cli
+    - containerd.io
+    - docker-buildx-plugin
+    - docker-compose-plugin
+- name: Delete iptables.conf
+  ansible.builtin.file:
+    state: absent
+    path: /etc/modules-load.d/iptables.conf
+- name: Uninstall dependencies
+  ansible.builtin.yum:
+    name: "{{ item }}"
+    state: absent
+  with_items:
+    - yum-utils
+    - device-mapper-persistent-data
+    - lvm2
+- name: Remove docker repo
+  ansible.builtin.file:
+    state: absent
+    path: /etc/yum.repos.d/docker-ce.repo
+- name: Delete kubernetes.repo
+  ansible.builtin.file:
+    state: absent
+    path: /etc/yum.repos.d/kubernetes.repo
+- name: Install kubectl
+  ansible.builtin.yum:
+    name: kubectl
+    state: absent

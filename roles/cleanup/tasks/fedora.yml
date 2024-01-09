@@ -34,7 +34,6 @@
         dest: /usr/local/bin/receptor
         state: absent
     - name: Uninstall make
-      when: ansible_distribution != "Ubuntu"
       ansible.builtin.yum:
         name: make
         state: absent
