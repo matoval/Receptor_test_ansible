@@ -1,7 +1,5 @@
 ---
 - name: Uninstall Go
-  become: true
-  when: "'go' in ansible_facts.packages"
   block:
     - name: Yum uninstall golang
       ansible.builtin.yum:
@@ -24,17 +22,18 @@
         - name: Source bashrc
           become: false
           ansible.builtin.shell: source /home/{{ ansible_user }}/.bashrc
+- name: Uinstall openssl
+  become: true
+  ansible.builtin.yum:
+    name: openssl
+    state: absent
 - name: Uninstall Receptor
-  when: "`receptor` in ansible_facts.pacages"
   block:
     - name: Unlink Receptor bin
-      become: true
       ansible.builtin.file:
-        src: /home/{{ ansible_user }}/receptor/receptor
         dest: /usr/local/bin/receptor
         state: absent
     - name: Uninstall make
-      become: true
       when: ansible_distribution != "Ubuntu"
       ansible.builtin.yum:
         name: make
@@ -44,12 +43,10 @@
         state: absent
         path: /home/{{ ansible_user }}/receptor
 - name: Uninstall Kind
-  become: true
   ansible.builtin.file:
     state: absent
     path: /usr/local/bin/kind
 - name: Delete user@.service.d dir
-  become: true
   ansible.builtin.file:
     state: absent
     path: /etc/systemd/system/user@.service.d
@@ -57,7 +54,7 @@
   ansible.builtin.yum:
     name: dnf-plugins-core
     state: absent
-- name: Install docker
+- name: Uninstall docker
   ansible.builtin.yum:
     name: "{{ item }}"
     state: absent
@@ -67,21 +64,15 @@
     - containerd.io
     - docker-buildx-plugin
     - docker-compose-plugin
-- name: Remove user from Docker group
-  become: true
-  ansible.builtin.command: gpasswd -d docker
 - name: Delete iptables.conf
-  become: true
   ansible.builtin.file:
     state: absent
     path: /etc/modules-load.d/iptables.conf
 - name: Delete kubernetes.repo
-  become: true
   ansible.builtin.file:
     state: absent
     path: /etc/yum.repos.d/kubernetes.repo
 - name: Install kubectl
-  become: true
   ansible.builtin.yum:
     name: kubectl
     state: absent

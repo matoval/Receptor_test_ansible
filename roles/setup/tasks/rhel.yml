@@ -140,12 +140,3 @@
   when: '"kind" not in get_clusters.stdout'
   ansible.builtin.command:
     cmd: kind create cluster
-- name: Get namespaces
-  ansible.builtin.shell: kubectl get namespaces
-  register: namespaces_list
-- name: Get services
-  ansible.builtin.shell: kubectl get services
-  register: services_list
-- name: Get serviceaccounts
-  ansible.builtin.shell: kubectl get serviceAccounts
-  register: serviceaccounts_list

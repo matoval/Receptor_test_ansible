@@ -3,6 +3,8 @@
   package_facts:
     manager: auto
 - name: Cleanup specific system
+  become: true
+  ignore_errors: true
   block:
     - name: Cleanup RHEL
       when: ansible_distribution == "RedHat"

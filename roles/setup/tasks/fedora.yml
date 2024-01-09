@@ -4,6 +4,11 @@
   ansible.builtin.yum:
     name: git
     state: present
+- name: Yum install openssl
+  become: true
+  ansible.builtin.yum:
+    name: openssl
+    state: present
 - name: Install Go
   become: true
   when: "'go' not in ansible_facts.packages"
@@ -144,12 +149,3 @@
   when: '"kind" not in get_clusters.stdout'
   ansible.builtin.command:
     cmd: kind create cluster
-- name: Get namespaces
-  ansible.builtin.shell: kubectl get namespaces
-  register: namespaces_list
-- name: Get services
-  ansible.builtin.shell: kubectl get services
-  register: services_list
-- name: Get serviceaccounts
-  ansible.builtin.shell: kubectl get serviceAccounts
-  register: serviceaccounts_list
